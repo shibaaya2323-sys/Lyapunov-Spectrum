@@ -1038,6 +1038,42 @@ def run_lyapunov(
     }
 
 # ============================================================
+# 18. Fig.3 実行用関数
+# ============================================================
+
+def run_fig3(
+    N,
+    nu,
+    dt,
+    transient_time,
+    t_max,
+    tau,
+    save_interval=1.0,
+    seed=42,
+):
+
+    result = run_lyapunov(
+        N=N,
+        nu=nu,
+        dt=dt,
+        transient_time=transient_time,
+        t_max=t_max,
+        tau=tau,
+        save_interval=save_interval,
+        seed=seed,
+    )
+
+    print()
+    print("--- Fig.3 result ---")
+    print(f"N        = {result['N']}")
+    print(f"nu       = {result['nu']:.1e}")
+    print(f"lambda_1 = {result['lambda_1']:.10e}")
+    print(f"H        = {result['H']:.10e}")
+    print(f"D_KY     = {result['D_KY']:.10f}")
+
+    return result
+
+# ============================================================
 # Lyapunov指数の時間履歴 描画用関数
 # ============================================================
 
