@@ -16,6 +16,7 @@
 
 import numpy as np
 from numba import njit
+import matplotlib.pyplot as plt
 
 # ============================================================
 # 1. 固定パラメータ
@@ -1035,4 +1036,191 @@ def run_lyapunov(
         "lambda_sum": lambda_sum,
         "divergence": divergence,
     }
+
+# ============================================================
+# Lyapunov指数の時間履歴 描画用関数
+# ============================================================
+
+def plot_lyapunov_history(
+    result,
+    index_start,
+    index_end,
+):
+
+    # --------------------------------------------------------
+    # データ
+    # --------------------------------------------------------
+
+    t = result["t"]
+    history = result["lambda_history"]
+
+    dim = history.shape[1]
+
+    # --------------------------------------------------------
+    # 指数番号の確認
+    # --------------------------------------------------------
+
+    if not (1 <= index_start <= index_end <= dim):
+        raise ValueError(
+            f"1 <= index_start <= index_end <= {dim} "
+            "となるように指定してください。"
+        )
+
+    # --------------------------------------------------------
+    # 描画
+    # --------------------------------------------------------
+
+    plt.figure(figsize=(7, 5))
+
+    for i in range(index_start - 1, index_end):
+
+        plt.plot(
+            t,
+            history[:, i],
+            label=rf"$\lambda_{i + 1}$",
+        )
+
+    plt.axhline(
+        0.0,
+        color="black",
+        linewidth=0.8,
+    )
+
+    plt.xlabel(r"$t$")
+    plt.ylabel(r"$\lambda_i(t)$")
+
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+# ============================================================
+# Lyapunov spectrum 描画用関数
+#
+# ・全体スペクトル
+# ・指定範囲の拡大スペクトル
+#
+# を描画する。
+# ============================================================
+
+def plot_lyapunov_spectrum(
+    result,
+    index_start=1,
+    index_end=None,
+):
+
+    # --------------------------------------------------------
+    # 計算結果の取得
+    # --------------------------------------------------------
+
+    lambdas = np.sort(
+        np.asarray(
+            result["lambdas"],
+            dtype=np.float64,
+        )
+    )[::-1]
+
+    num_exponents = lambdas.size
+
+    j = np.arange(
+        1,
+        num_exponents + 1,
+    )
+
+    # --------------------------------------------------------
+    # 拡大表示する終了番号
+    # --------------------------------------------------------
+
+    if index_end is None:
+        actual_end = num_exponents
+    else:
+        actual_end = min(
+            index_end,
+            num_exponents,
+        )
+
+    # --------------------------------------------------------
+    # 表示範囲の確認
+    # --------------------------------------------------------
+
+    if not (
+        1
+        <= index_start
+        <= actual_end
+    ):
+        raise ValueError(
+            f"表示範囲を確認してください。"
+            f"この結果の指数は{num_exponents}本です。"
+        )
+
+    # ========================================================
+    # 1. Lyapunov spectrum 全体
+    # ========================================================
+
+    plt.figure(
+        figsize=(7, 5.5)
+    )
+
+    plt.plot(
+        j,
+        lambdas,
+        marker="o",
+        markersize=4,
+    )
+
+    plt.axhline(
+        0.0,
+        color="black",
+        linewidth=1.0,
+    )
+
+    plt.xlabel(r"$j$")
+    plt.ylabel(r"$\lambda_j$")
+
+    plt.title(
+        "Lyapunov spectrum"
+    )
+
+    plt.grid()
+
+    plt.tight_layout()
+    plt.show()
+
+    # ========================================================
+    # 2. 指定範囲を拡大
+    # ========================================================
+
+    selected = slice(
+        index_start - 1,
+        actual_end,
+    )
+
+    plt.figure(
+        figsize=(7, 5.5)
+    )
+
+    plt.plot(
+        j[selected],
+        lambdas[selected],
+        marker="o",
+        markersize=4,
+    )
+
+    plt.axhline(
+        0.0,
+        color="black",
+        linewidth=1.0,
+    )
+
+    plt.xlabel(r"$j$")
+    plt.ylabel(r"$\lambda_j$")
+
+    plt.title(
+        rf"Lyapunov spectrum "
+        rf"($j={index_start},\ldots,{actual_end}$)"
+    )
+
+    plt.grid()
+
+    plt.tight_layout()
+    plt.show()
 
