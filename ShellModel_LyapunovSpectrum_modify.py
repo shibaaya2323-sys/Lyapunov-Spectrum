@@ -742,9 +742,11 @@ def calculate_lyapunov_numba(
 
     n_lambda_history = np.zeros((num_save, dim),dtype=np.float64)
 
+    # MGS直交性誤差の時間履歴
+    n_orthogonality_error_history = np.zeros(num_save,dtype=np.float64)
+
     epsilon_sum = 0.0
     epsilon_count = 0
-    max_orthogonality_error = 0.0
     save_index = 0
 
     # --------------------------------------------------------
@@ -862,17 +864,6 @@ def calculate_lyapunov_numba(
         # 正規直交化
         gram_schmidt_real_into_numba(n_E,n_Q,n_r_diag,n_w)
 
-        # --------------------------------------------------------
-        # MGS後の直交性を確認
-        #
-        # max_{i != j} |<q_i, q_j>|
-        # --------------------------------------------------------
-
-        orthogonality_error = (calculate_max_orthogonality_error_numba(n_Q))
-
-        if orthogonality_error > max_orthogonality_error:
-           max_orthogonality_error = orthogonality_error
-
         # Qを次の摂動基底として使用。
         # 古いEは、次回のQの書き込み先として再利用。
         n_E, n_Q = n_Q, n_E
@@ -891,6 +882,15 @@ def calculate_lyapunov_numba(
             for j in range(dim):
                 n_lambda_history[save_index, j] = (n_sum_log[j] / t)
 
+            # --------------------------------------------------------
+            # MGS直交性の検証
+            #
+            # n_E, n_Q = n_Q, n_E の交換後なので、
+            # 直交化済み基底は n_E に入っている。
+            # --------------------------------------------------------
+
+            n_orthogonality_error_history[save_index] = (calculate_max_orthogonality_error_numba(n_E))
+
             save_index += 1
 
     epsilon_mean = epsilon_sum / epsilon_count
@@ -900,7 +900,7 @@ def calculate_lyapunov_numba(
         n_times,
         n_lambda_history,
         epsilon_mean,
-        max_orthogonality_error,
+        n_orthogonality_error,
     )
 
 # ============================================================
@@ -1173,7 +1173,7 @@ def run_lyapunov(
         n_times,
         n_lambda_history,
         epsilon_mean,
-        max_orthogonality_error,
+        n_orthogonality_error,
     ) = calculate_lyapunov_numba(
         n_u,
         dt,
@@ -1197,6 +1197,8 @@ def run_lyapunov(
 
     lambdas = n_lambda_history[-1].copy()
 
+    max_orthogonality_error = np.max(n_orthogonality_error_history)
+    
     D_KY = calculate_kaplan_yorke_dimension(lambdas)
 
     k_d = calculate_dissipation_wavenumber(epsilon_mean, nu)
@@ -1268,6 +1270,7 @@ def run_lyapunov(
 
         "lambda_sum": lambda_sum,
         "divergence": divergence,
+        "orthogonality_error_history": n_orthogonality_error_history.copy(),
         "max_orthogonality_error": max_orthogonality_error,
     }
 
