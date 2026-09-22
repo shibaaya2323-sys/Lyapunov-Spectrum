@@ -576,6 +576,38 @@ def gram_schmidt_real_into_numba(
         n_r_diag[j] = r_jj
 
 # ============================================================
+# MGS直交性の検証
+#
+# max_{i != j} |<q_i, q_j>|
+#
+# 完全に直交していれば 0。
+# 数値計算では丸め誤差により非常に小さい値になる。
+# ============================================================
+
+@njit
+def calculate_max_orthogonality_error_numba(n_Q):
+
+    dim = n_Q.shape[1]
+
+    max_error = 0.0
+
+    for i in range(dim):
+
+        for j in range(i + 1, dim):
+
+            inner = real_inner_product_numba(
+                n_Q[:, i],
+                n_Q[:, j]
+            )
+
+            error = abs(inner)
+
+            if error > max_error:
+                max_error = error
+
+    return max_error
+
+# ============================================================
 # 11. 過渡状態の時間積分
 #
 # 作業配列をループの外で一度だけ確保する。
@@ -712,6 +744,7 @@ def calculate_lyapunov_numba(
 
     epsilon_sum = 0.0
     epsilon_count = 0
+    max_orthogonality_error = 0.0
     save_index = 0
 
     # --------------------------------------------------------
@@ -829,6 +862,17 @@ def calculate_lyapunov_numba(
         # 正規直交化
         gram_schmidt_real_into_numba(n_E,n_Q,n_r_diag,n_w)
 
+        # --------------------------------------------------------
+        # MGS後の直交性を確認
+        #
+        # max_{i != j} |<q_i, q_j>|
+        # --------------------------------------------------------
+
+        orthogonality_error = (calculate_max_orthogonality_error_numba(n_Q))
+
+        if orthogonality_error > max_orthogonality_error:
+           max_orthogonality_error = orthogonality_error
+
         # Qを次の摂動基底として使用。
         # 古いEは、次回のQの書き込み先として再利用。
         n_E, n_Q = n_Q, n_E
@@ -856,6 +900,7 @@ def calculate_lyapunov_numba(
         n_times,
         n_lambda_history,
         epsilon_mean,
+        max_orthogonality_error,
     )
 
 # ============================================================
@@ -1128,6 +1173,7 @@ def run_lyapunov(
         n_times,
         n_lambda_history,
         epsilon_mean,
+        max_orthogonality_error,
     ) = calculate_lyapunov_numba(
         n_u,
         dt,
@@ -1188,6 +1234,10 @@ def run_lyapunov(
     print(f"relative error = {relative_error:.10e}")
     print(f"relative error (%) = {100.0 * relative_error:.6f} %")
 
+    print()
+    print("--- MGS 直交性 ---")
+    print("max |<q_i,q_j>| (i != j) = "f"{max_orthogonality_error:.10e}")
+
     # --------------------------------------------------------
     # 辞書形式で返す
     # --------------------------------------------------------
@@ -1218,6 +1268,7 @@ def run_lyapunov(
 
         "lambda_sum": lambda_sum,
         "divergence": divergence,
+        "max_orthogonality_error": max_orthogonality_error,
     }
 
 # ============================================================
