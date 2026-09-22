@@ -835,7 +835,7 @@ def calculate_lyapunov_numba(
 
         # log(r_jj)の累積
         for j in range(dim):
-            n_sum_log[j] += np.log(abs(n_r_diag[j]))
+            n_sum_log[j] += np.log(n_r_diag[j])
 
         t = (m + 1) * tau
 
@@ -1270,7 +1270,7 @@ def run_fig3(
 def plot_fig3(*results):
 
     # --------------------------------------------------------
-    # nu の小さい順に並べる
+    # nu の大さい順に並べる
     # --------------------------------------------------------
 
     results = sorted(
