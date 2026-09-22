@@ -346,7 +346,7 @@ def rk4_step_u_inplace_numba(
 
 
 # ============================================================
-# 8-2. 第一変分方程式だけの積分因子入りRK4
+# 8. 第一変分方程式だけの積分因子入りRK4
 #
 # 基準軌道はあらかじめ
 #
@@ -900,7 +900,7 @@ def calculate_lyapunov_numba(
         n_times,
         n_lambda_history,
         epsilon_mean,
-        n_orthogonality_error,
+        n_orthogonality_error_history,
     )
 
 # ============================================================
@@ -1173,7 +1173,7 @@ def run_lyapunov(
         n_times,
         n_lambda_history,
         epsilon_mean,
-        n_orthogonality_error,
+        n_orthogonality_error_history,
     ) = calculate_lyapunov_numba(
         n_u,
         dt,
@@ -1324,7 +1324,7 @@ def run_fig3(
 def plot_fig3(*results):
 
     # --------------------------------------------------------
-    # nu の大さい順に並べる
+    # nu の大きい順に並べる
     # --------------------------------------------------------
 
     results = sorted(
