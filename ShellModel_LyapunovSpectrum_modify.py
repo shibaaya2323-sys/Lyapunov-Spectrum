@@ -255,21 +255,29 @@ def make_initial_condition_numba(n_k, n_k_sq, seed=42):
 # 6. 初期摂動基底
 # ============================================================
 
-
 @njit
-def make_initial_tangent_basis_numba(N):
+def make_initial_tangent_basis_numba(N, basis_seed):
     dim = 2 * N
-    n_E = np.zeros((N, dim), dtype=np.complex128)
+
+    np.random.seed(basis_seed)
+
+    # 実 2N 次元のランダム行列
+    A = np.random.normal(0.0, 1.0, (dim, dim))
+
+    # 列を正規直交化
+    Q, R = np.linalg.qr(A)
+
+    # 実 2N 成分 → 複素 N 成分
+    n_E = np.empty((N, dim), dtype=np.complex128)
 
     for i in range(N):
-        # 実部方向
-        n_E[i, 2 * i] = 1.0 + 0j
-
-        # 虚部方向
-        n_E[i, 2 * i + 1] = 0.0 + 1j
+        for j in range(dim):
+            n_E[i, j] = (
+                Q[2 * i, j]
+                + 1j * Q[2 * i + 1, j]
+            )
 
     return n_E
-
 
 # ============================================================
 # 7. 基準軌道だけの積分因子入り RK4
@@ -624,6 +632,7 @@ def calculate_lyapunov_numba(
     f,
     n_k_sq,
     nu,
+    basis_seed,
 ):
     n_u = n_u.copy()
 
@@ -636,13 +645,10 @@ def calculate_lyapunov_numba(
     num_save = int(round(t_max / save_interval))
 
     # 初期摂動基底
-    n_E = make_initial_tangent_basis_numba(N_local)
+    n_E = make_initial_tangent_basis_numba(N_local,basis_seed)
 
     # 正規直交化の作業配列
-    n_Q = np.empty(
-        (N_local, dim),
-        dtype=np.complex128,
-    )
+    n_Q = np.empty((N_local, dim),dtype=np.complex128)
     n_r_diag = np.empty(dim, dtype=np.float64)
     n_w = np.empty(N_local, dtype=np.complex128)
 
@@ -866,6 +872,7 @@ def run_lyapunov(
     tau,
     save_interval,
     seed=42,
+    basis_seed=12345,
 ):
     # --------------------------------------------------------
     # 入力値の確認と変換
@@ -879,6 +886,12 @@ def run_lyapunov(
         or not 0 <= seed <= 4294967295
     ):
         raise ValueError("seedは0～4294967295の整数にしてください。")
+
+    if (
+        not isinstance(basis_seed, (int, np.integer))
+        or not 0 <= basis_seed <= 4294967295
+    ):
+        raise ValueError("basis_seedは0～4294967295の整数にしてください。")
 
     if not np.all(
         np.isfinite(
@@ -1025,6 +1038,7 @@ def run_lyapunov(
     print(f"シェル数 N: {N}")
     print(f"実次元 2N: {2 * N}")
     print(f"初期位相の乱数 seed: {seed}")
+    print(f"初期摂動基底の乱数 basis_seed: {basis_seed}")
     print(f"動粘性係数 nu: {nu:.10e}")
     print(f"変分方程式の時間刻み dt: {dt}")
     print(f"基準軌道の時間刻み dt/2: {orbit_dt}")
@@ -1097,6 +1111,7 @@ def run_lyapunov(
         f,
         n_k_sq,
         nu,
+        basis_seed,
     )
 
     # --------------------------------------------------------
@@ -1172,6 +1187,7 @@ def run_lyapunov(
         "tau": tau,
         "save_interval": save_interval,
         "seed": seed,
+        "basis_seed": basis_seed,
         "lambda_1": np.max(lambdas),
         "H": calculate_kolmogorov_entropy(lambdas),
         "k": n_k.copy(),
@@ -1201,6 +1217,7 @@ def run_fig3(
     tau,
     save_interval=1.0,
     seed=42,
+    basis_seed=12345,
 ):
     result = run_lyapunov(
         N=N,
@@ -1211,12 +1228,15 @@ def run_fig3(
         tau=tau,
         save_interval=save_interval,
         seed=seed,
+        basis_seed=basis_seed,
     )
 
     print()
     print("--- Fig.3 result ---")
     print(f"N        = {result['N']}")
     print(f"nu       = {result['nu']:.1e}")
+    print(f"seed       = {result['seed']}")
+    print(f"basis_seed = {result['basis_seed']}")
     print(f"lambda_1 = {result['lambda_1']:.10e}")
     print(f"H        = {result['H']:.10e}")
     print(f"D_KY     = {result['D_KY']:.10f}")
