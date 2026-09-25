@@ -252,19 +252,42 @@ def make_initial_condition_numba(n_k, n_k_sq, seed=42):
     return n_u
 
 @njit
-def make_initial_tangent_basis_numba(N):
+def make_initial_tangent_basis_numba(
+    N,
+    basis_seed=12345,
+    random_basis=True,
+):
 
     dim = 2 * N
 
-    n_E = np.zeros((N, dim), dtype=np.complex128)
+    n_E = np.zeros((N, dim),dtype=np.complex128)
 
-    for i in range(N):
+    # --------------------------------------------------------
+    # ランダム基底
+    # --------------------------------------------------------
+    if random_basis:
 
-        # 実部方向
-        n_E[i, 2 * i] = 1.0 + 0j
+        np.random.seed(basis_seed)
 
-        # 虚部方向
-        n_E[i, 2 * i + 1] = 0.0 + 1j
+        A = np.random.normal(0.0,1.0,(dim, dim))
+
+        Q, R = np.linalg.qr(A)
+
+        for i in range(N):
+            for j in range(dim):
+
+                n_E[i, j] = (Q[2 * i, j] + 1j * Q[2 * i + 1, j])
+
+    # --------------------------------------------------------
+    # 標準基底
+    # --------------------------------------------------------
+    else:
+
+        for i in range(N):
+
+            n_E[i, 2 * i] = 1.0 + 0.0j
+
+            n_E[i, 2 * i + 1] = 0.0 + 1.0j
 
     return n_E
 
@@ -685,6 +708,8 @@ def calculate_lyapunov_numba(
     f,
     n_k_sq,
     nu,
+    basis_seed,
+    random_basis,
 ):
 
     n_u = n_u.copy()
@@ -701,14 +726,13 @@ def calculate_lyapunov_numba(
     # 初期摂動基底
     # --------------------------------------------------------
 
-    n_E = make_initial_tangent_basis_numba(N_local)
+    n_E = make_initial_tangent_basis_numba(N_local,basis_seed,random_basis)
 
     # --------------------------------------------------------
     # 正規直交化の作業配列
     # --------------------------------------------------------
 
     n_Q = np.empty((N_local, dim),dtype=np.complex128)
-
     n_r_diag = np.empty(dim, dtype=np.float64)
     n_w = np.empty(N_local, dtype=np.complex128)
 
@@ -873,11 +897,7 @@ def calculate_lyapunov_numba(
         # max |<q_i,q_j> - delta_ij| を測る。
         # ----------------------------------------------------
 
-        orthogonality_error = (
-            calculate_max_orthogonality_error_numba(
-                n_E
-            )
-        )
+        orthogonality_error = (calculate_max_orthogonality_error_numba(n_E))
 
         if orthogonality_error > max_orthogonality_error:
             max_orthogonality_error = orthogonality_error
@@ -917,6 +937,8 @@ def run_lyapunov(
     tau,
     save_interval,
     seed=42,
+    basis_seed=12345,
+    basis_type="standard",
 ):
 
     # --------------------------------------------------------
@@ -931,6 +953,15 @@ def run_lyapunov(
         or not 0 <= seed <= 4294967295
     ):
         raise ValueError("seedは0～4294967295の整数にしてください。")
+
+    if (
+        not isinstance(basis_seed, (int, np.integer))
+        or not 0 <= basis_seed <= 4294967295
+    ):
+        raise ValueError("basis_seedは0～4294967295の整数にしてください。")
+
+    if basis_type not in ("standard", "random"):
+        raise ValueError('basis_typeは"standard"または"random"にしてください。')
 
     if not np.all(
         np.isfinite(
@@ -988,10 +1019,7 @@ def run_lyapunov(
     steps_per_tau = int(round(tau / dt))
     actual_tau = steps_per_tau * dt
 
-    if not np.isclose(
-        actual_tau, tau,
-        rtol=1.0e-12, atol=1.0e-14,
-    ):
+    if not np.isclose(actual_tau, tau,rtol=1.0e-12, atol=1.0e-14):
         raise ValueError("tauはdtの整数倍にしてください。")
 
     # --------------------------------------------------------
@@ -1064,6 +1092,10 @@ def run_lyapunov(
     print(f"シェル数 N: {N}")
     print(f"実次元 2N: {2 * N}")
     print(f"初期位相の乱数 seed: {seed}")
+    print(f"初期摂動基底: {basis_type}")
+
+    if basis_type == "random":
+        print(f"初期摂動基底の乱数 basis_seed: {basis_seed}")
     print(f"動粘性係数 nu: {nu:.10e}")
 
     print(f"変分方程式の時間刻み dt: {dt}")
@@ -1131,6 +1163,8 @@ def run_lyapunov(
         f,
         n_k_sq,
         nu,
+        basis_seed,
+        basis_type == "random",
     )
 
     # --------------------------------------------------------
@@ -1178,10 +1212,7 @@ def run_lyapunov(
 
     print()
     print("--- Modified Gram-Schmidt の直交性 ---")
-    print(
-        "max |<q_i,q_j> - delta_ij| = "
-        f"{max_orthogonality_error:.10e}"
-    )
+    print("max |<q_i,q_j> - delta_ij| = "f"{max_orthogonality_error:.10e}")
 
     # --------------------------------------------------------
     # 辞書形式で返す
@@ -1196,6 +1227,9 @@ def run_lyapunov(
         "tau": tau,
         "save_interval": save_interval,
         "seed": seed,
+
+        "basis_seed": basis_seed,
+        "basis_type": basis_type,
 
         "lambda_1": np.max(lambdas),
         "H": calculate_kolmogorov_entropy(lambdas),
@@ -1247,10 +1281,7 @@ def full_rhs_numba(
     # 粘性項も加えて完全な右辺 F(u) を作る
     for i in range(N_local):
 
-        n_rhs[i] = (
-            -nu * n_k_sq[i] * n_u[i]
-            + work_nl[i]
-        )
+        n_rhs[i] = (-nu * n_k_sq[i] * n_u[i] + work_nl[i])
 
 @njit
 def central_difference_numba(
@@ -1282,15 +1313,9 @@ def central_difference_numba(
 
     for i in range(N_local):
 
-        n_u_plus[i] = (
-            n_u[i]
-            + epsilon * n_delta_u[i]
-        )
+        n_u_plus[i] = (n_u[i] + epsilon * n_delta_u[i])
 
-        n_u_minus[i] = (
-            n_u[i]
-            - epsilon * n_delta_u[i]
-        )
+        n_u_minus[i] = (n_u[i] - epsilon * n_delta_u[i])
 
     # --------------------------------------------------------
     # F(u + epsilon delta_u)
@@ -1330,10 +1355,7 @@ def central_difference_numba(
 
     for i in range(N_local):
 
-        n_center_diff[i] = (
-            n_rhs_plus[i]
-            - n_rhs_minus[i]
-        ) / (2.0 * epsilon)
+        n_center_diff[i] = (n_rhs_plus[i] - n_rhs_minus[i]) / (2.0 * epsilon)
 
 @njit
 def analytical_variation_numba(
@@ -1444,7 +1466,19 @@ def check_variational_equation(
     epsilon_values,
     basis_index=0,
     seed=42,
+    basis_seed=12345,
+    basis_type="standard",
 ):
+
+    # --------------------------------------------------------
+    # 初期摂動基底の設定確認
+    # --------------------------------------------------------
+
+    if basis_type not in ("standard", "random"):
+        raise ValueError('basis_typeは"standard"または"random"にしてください。')
+
+    if (not isinstance(basis_seed, (int, np.integer)) or not 0 <= basis_seed <= 4294967295):
+        raise ValueError("basis_seedは0～4294967295の整数にしてください。")
 
     # --------------------------------------------------------
     # シェルパラメータ
@@ -1462,23 +1496,15 @@ def check_variational_equation(
     # 初期条件
     # --------------------------------------------------------
 
-    n_u = make_initial_condition_numba(
-        n_k,
-        n_k_sq,
-        seed,
-    )
+    n_u = make_initial_condition_numba(n_k,n_k_sq,seed)
 
     # --------------------------------------------------------
     # 積分因子
     # --------------------------------------------------------
 
-    n_E_visc_half = np.exp(
-        -nu * n_k_sq * dt * 0.5
-    )
+    n_E_visc_half = np.exp(-nu * n_k_sq * dt * 0.5)
 
-    n_E_visc_quarter = np.exp(
-        -nu * n_k_sq * dt * 0.25
-    )
+    n_E_visc_quarter = np.exp(-nu * n_k_sq * dt * 0.25)
 
     # --------------------------------------------------------
     # 過渡状態
@@ -1502,14 +1528,12 @@ def check_variational_equation(
     # 初期摂動基底
     # --------------------------------------------------------
 
-    n_E = make_initial_tangent_basis_numba(N)
+    n_E = make_initial_tangent_basis_numba(N,basis_seed,basis_type == "random")
 
     dim = 2 * N
 
     if not (0 <= basis_index < dim):
-        raise ValueError(
-            f"basis_index は 0 から {dim - 1} の範囲にしてください。"
-        )
+        raise ValueError(f"basis_index は 0 から {dim - 1} の範囲にしてください。")
 
     # --------------------------------------------------------
     # 検証に使う摂動ベクトル delta_u
@@ -1523,55 +1547,25 @@ def check_variational_equation(
     # 作業配列
     # --------------------------------------------------------
 
-    n_analytic = np.empty(
-        N,
-        dtype=np.complex128,
-    )
+    n_analytic = np.empty(N,dtype=np.complex128)
 
-    n_center_diff = np.empty(
-        N,
-        dtype=np.complex128,
-    )
+    n_center_diff = np.empty(N,dtype=np.complex128)
 
-    n_u_plus = np.empty(
-        N,
-        dtype=np.complex128,
-    )
+    n_u_plus = np.empty(N,dtype=np.complex128)
 
-    n_u_minus = np.empty(
-        N,
-        dtype=np.complex128,
-    )
+    n_u_minus = np.empty(N,dtype=np.complex128)
 
-    n_rhs_plus = np.empty(
-        N,
-        dtype=np.complex128,
-    )
+    n_rhs_plus = np.empty(N,dtype=np.complex128)
 
-    n_rhs_minus = np.empty(
-        N,
-        dtype=np.complex128,
-    )
+    n_rhs_minus = np.empty(N,dtype=np.complex128)
 
-    work_nl_plus = np.empty(
-        N,
-        dtype=np.complex128,
-    )
+    work_nl_plus = np.empty(N,dtype=np.complex128)
 
-    work_nl_minus = np.empty(
-        N,
-        dtype=np.complex128,
-    )
+    work_nl_minus = np.empty(N,dtype=np.complex128)
 
-    n_E_temp = np.empty(
-        (N, 1),
-        dtype=np.complex128,
-    )
+    n_E_temp = np.empty((N, 1),dtype=np.complex128)
 
-    n_dE_temp = np.empty(
-        (N, 1),
-        dtype=np.complex128,
-    )
+    n_dE_temp = np.empty((N, 1),dtype=np.complex128)
 
     # --------------------------------------------------------
     # 解析的な DF(u) delta_u
@@ -1596,20 +1590,11 @@ def check_variational_equation(
     # 誤差保存用
     # --------------------------------------------------------
 
-    epsilon_values = np.asarray(
-        epsilon_values,
-        dtype=np.float64,
-    )
+    epsilon_values = np.asarray(epsilon_values,dtype=np.float64)
 
-    absolute_errors = np.empty(
-        epsilon_values.size,
-        dtype=np.float64,
-    )
+    absolute_errors = np.empty(epsilon_values.size,dtype=np.float64)
 
-    relative_errors = np.empty(
-        epsilon_values.size,
-        dtype=np.float64,
-    )
+    relative_errors = np.empty(epsilon_values.size,dtype=np.float64)
 
     # --------------------------------------------------------
     # epsilon を変えながら中心差分を計算
@@ -1686,7 +1671,15 @@ def check_variational_one_step(
     epsilon_values,
     basis_index=0,
     seed=42,
+    basis_seed=12345,
+    basis_type="standard",
 ):
+
+    if basis_type not in ("standard", "random"):
+        raise ValueError('basis_typeは"standard"または"random"にしてください。')
+
+    if (not isinstance(basis_seed, (int, np.integer)) or not 0 <= basis_seed <= 4294967295):
+        raise ValueError("basis_seedは0～4294967295の整数にしてください。")
 
     # --------------------------------------------------------
     # 1. シェルパラメータ
@@ -1717,17 +1710,11 @@ def check_variational_one_step(
     # 基準軌道は dt/2 ずつ2回進める。
     # --------------------------------------------------------
 
-    n_E_visc = np.exp(
-        -nu * n_k_sq * dt
-    )
+    n_E_visc = np.exp(-nu * n_k_sq * dt)
 
-    n_E_visc_half = np.exp(
-        -nu * n_k_sq * dt * 0.5
-    )
+    n_E_visc_half = np.exp(-nu * n_k_sq * dt * 0.5)
 
-    n_E_visc_quarter = np.exp(
-        -nu * n_k_sq * dt * 0.25
-    )
+    n_E_visc_quarter = np.exp(-nu * n_k_sq * dt * 0.25)
 
     # --------------------------------------------------------
     # 4. 過渡状態
@@ -1759,14 +1746,12 @@ def check_variational_one_step(
     # 6. 初期摂動基底
     # --------------------------------------------------------
 
-    n_basis = make_initial_tangent_basis_numba(N)
+    n_basis = make_initial_tangent_basis_numba(N,basis_seed,basis_type == "random")
 
     dim = 2 * N
 
     if not (0 <= basis_index < dim):
-        raise ValueError(
-            f"basis_index は 0 から {dim - 1} の範囲にしてください。"
-        )
+        raise ValueError(f"basis_index は 0 から {dim - 1} の範囲にしてください。")
 
     # 検証する1本の摂動
     n_delta_u = n_basis[:, basis_index].copy()
@@ -1785,10 +1770,7 @@ def check_variational_one_step(
 
     n_u_half = n_u_start.copy()
 
-    work_u_base = np.empty(
-        (5, N),
-        dtype=np.complex128,
-    )
+    work_u_base = np.empty((5, N),dtype=np.complex128)
 
     # u(t) -> u(t + dt/2)
     rk4_step_u_inplace_numba(
@@ -1829,18 +1811,12 @@ def check_variational_one_step(
     # を rk4_step_E_inplace_numba() で計算する。
     # --------------------------------------------------------
 
-    n_E_test = np.empty(
-        (N, 1),
-        dtype=np.complex128,
-    )
+    n_E_test = np.empty((N, 1),dtype=np.complex128)
 
     for i in range(N):
         n_E_test[i, 0] = n_delta_u[i]
 
-    work_E_test = np.empty(
-        (5, N, 1),
-        dtype=np.complex128,
-    )
+    work_E_test = np.empty((5, N, 1),dtype=np.complex128)
 
     rk4_step_E_inplace_numba(
         n_E_test,
@@ -1863,34 +1839,19 @@ def check_variational_one_step(
     # 9. epsilon の準備
     # --------------------------------------------------------
 
-    epsilon_values = np.asarray(
-        epsilon_values,
-        dtype=np.float64,
-    )
+    epsilon_values = np.asarray(epsilon_values,dtype=np.float64)
 
-    absolute_errors = np.empty(
-        epsilon_values.size,
-        dtype=np.float64,
-    )
+    absolute_errors = np.empty(epsilon_values.size,dtype=np.float64)
 
-    relative_errors = np.empty(
-        epsilon_values.size,
-        dtype=np.float64,
-    )
+    relative_errors = np.empty(epsilon_values.size,dtype=np.float64)
 
     # --------------------------------------------------------
     # 10. 作業配列
     # --------------------------------------------------------
 
-    work_u_plus = np.empty(
-        (5, N),
-        dtype=np.complex128,
-    )
+    work_u_plus = np.empty((5, N),dtype=np.complex128)
 
-    work_u_minus = np.empty(
-        (5, N),
-        dtype=np.complex128,
-    )
+    work_u_minus = np.empty((5, N),dtype=np.complex128)
 
     # --------------------------------------------------------
     # 11. epsilon を変えながら
@@ -1911,15 +1872,9 @@ def check_variational_one_step(
         # u - epsilon delta_u
         # ----------------------------------------------------
 
-        n_u_plus = (
-            n_u_start
-            + epsilon * n_delta_u
-        ).copy()
+        n_u_plus = (n_u_start + epsilon * n_delta_u).copy()
 
-        n_u_minus = (
-            n_u_start
-            - epsilon * n_delta_u
-        ).copy()
+        n_u_minus = (n_u_start - epsilon * n_delta_u).copy()
 
         # ----------------------------------------------------
         # plus側
@@ -1989,35 +1944,22 @@ def check_variational_one_step(
         #                     2 eps
         # ----------------------------------------------------
 
-        n_center_diff = (
-            n_u_plus
-            - n_u_minus
-        ) / (2.0 * epsilon)
+        n_center_diff = (n_u_plus - n_u_minus) / (2.0 * epsilon)
 
         # ----------------------------------------------------
         # 13. 第一変分方程式との誤差
         # ----------------------------------------------------
 
-        difference = (
-            n_center_diff
-            - n_variational
-        )
+        difference = (n_center_diff - n_variational)
 
-        absolute_error = np.linalg.norm(
-            difference
-        )
+        absolute_error = np.linalg.norm(difference)
 
-        variational_norm = np.linalg.norm(
-            n_variational
-        )
+        variational_norm = np.linalg.norm(n_variational)
 
         if variational_norm == 0.0:
             relative_error = np.nan
         else:
-            relative_error = (
-                absolute_error
-                / variational_norm
-            )
+            relative_error = (absolute_error / variational_norm)
 
         absolute_errors[m] = absolute_error
         relative_errors[m] = relative_error
@@ -2026,22 +1968,14 @@ def check_variational_one_step(
     # 14. 結果表示
     # --------------------------------------------------------
 
-    print(
-        "--- 第一変分方程式の1ステップ検証 ---"
-    )
+    print("--- 第一変分方程式の1ステップ検証 ---")
 
     print(f"N = {N}")
     print(f"nu = {nu:.10e}")
     print(f"dt = {dt}")
-    print(
-        f"基準軌道の時間刻み = {0.5 * dt}"
-    )
-    print(
-        f"transient_time = {transient_time}"
-    )
-    print(
-        f"basis_index = {basis_index}"
-    )
+    print(f"基準軌道の時間刻み = {0.5 * dt}")
+    print(f"transient_time = {transient_time}")
+    print(f"basis_index = {basis_index}")
     print()
 
     for m in range(epsilon_values.size):
@@ -2078,25 +2012,13 @@ def check_mgs_orthogonality(
 
     rng = np.random.default_rng(seed)
 
-    n_A = (
-        rng.standard_normal((N, dim))
-        + 1j * rng.standard_normal((N, dim))
-    )
+    n_A = (rng.standard_normal((N, dim)) + 1j * rng.standard_normal((N, dim)))
 
-    n_Q = np.empty(
-        (N, dim),
-        dtype=np.complex128,
-    )
+    n_Q = np.empty((N, dim),dtype=np.complex128)
 
-    n_r_diag = np.empty(
-        dim,
-        dtype=np.float64,
-    )
+    n_r_diag = np.empty(dim,dtype=np.float64)
 
-    n_w = np.empty(
-        N,
-        dtype=np.complex128,
-    )
+    n_w = np.empty(N,dtype=np.complex128)
 
     gram_schmidt_real_into_numba(
         n_A,
@@ -2105,21 +2027,12 @@ def check_mgs_orthogonality(
         n_w,
     )
 
-    max_error = (
-        calculate_max_orthogonality_error_numba(
-            n_Q
-        )
-    )
+    max_error = (calculate_max_orthogonality_error_numba(n_Q))
 
-    print(
-        "--- Modified Gram-Schmidt の直交性検証 ---"
-    )
+    print("--- Modified Gram-Schmidt の直交性検証 ---")
     print(f"N = {N}")
     print(f"実次元 2N = {dim}")
-    print(
-        "max |<q_i,q_j> - delta_ij| = "
-        f"{max_error:.10e}"
-    )
+    print("max |<q_i,q_j> - delta_ij| = "f"{max_error:.10e}")
 
     return {
         "Q": n_Q.copy(),
@@ -2153,11 +2066,7 @@ def check_base_orbit_stationarity(
     # 2. 初期条件
     # ========================================================
 
-    n_u = make_initial_condition_numba(
-        n_k,
-        n_k_sq,
-        seed,
-    )
+    n_u = make_initial_condition_numba(n_k,n_k_sq,seed)
 
     # ========================================================
     # 3. 基準軌道の時間刻み
@@ -2167,13 +2076,9 @@ def check_base_orbit_stationarity(
 
     orbit_dt = 0.5 * dt
 
-    n_E_visc_orbit = np.exp(
-        -nu * n_k_sq * orbit_dt
-    )
+    n_E_visc_orbit = np.exp(-nu * n_k_sq * orbit_dt)
 
-    n_E_visc_orbit_half = np.exp(
-        -nu * n_k_sq * orbit_dt * 0.5
-    )
+    n_E_visc_orbit_half = np.exp(-nu * n_k_sq * orbit_dt * 0.5)
 
     # ========================================================
     # 4. 過渡状態
@@ -2195,46 +2100,25 @@ def check_base_orbit_stationarity(
     # 5. 保存条件
     # ========================================================
 
-    num_steps = int(
-        round(measurement_time / orbit_dt)
-    )
+    num_steps = int(round(measurement_time / orbit_dt))
 
-    save_every = int(
-        round(save_interval / orbit_dt)
-    )
+    save_every = int(round(save_interval / orbit_dt))
 
     if save_every < 1:
-        raise ValueError(
-            "save_interval は orbit_dt 以上にしてください。"
-        )
+        raise ValueError("save_interval は orbit_dt 以上にしてください。")
 
     num_save = num_steps // save_every
 
-    times = np.empty(
-        num_save,
-        dtype=np.float64,
-    )
+    times = np.empty(num_save,dtype=np.float64)
 
-    epsilon_history = np.empty(
-        num_save,
-        dtype=np.float64,
-    )
+    epsilon_history = np.empty(num_save,dtype=np.float64)
 
-    injection_history = np.empty(
-        num_save,
-        dtype=np.float64,
-    )
+    injection_history = np.empty(num_save,dtype=np.float64)
 
-    energy_history = np.empty(
-        num_save,
-        dtype=np.float64,
-    )
+    energy_history = np.empty(num_save,dtype=np.float64)
 
     # RK4 作業配列
-    work_u = np.empty(
-        (5, N),
-        dtype=np.complex128,
-    )
+    work_u = np.empty((5, N),dtype=np.complex128)
 
     save_index = 0
 
@@ -2268,24 +2152,13 @@ def check_base_orbit_stationarity(
             # 散逸率
             # ------------------------------
 
-            epsilon = (
-                calculate_energy_dissipation_numba(
-                    n_u,
-                    n_k_sq,
-                    nu,
-                )
-            )
+            epsilon = (calculate_energy_dissipation_numba(n_u,n_k_sq,nu))
 
             # ------------------------------
             # 注入率
             # ------------------------------
 
-            injection = (
-                calculate_energy_injection_numba(
-                    n_u,
-                    f,
-                )
-            )
+            injection = (calculate_energy_injection_numba(n_u,f))
 
             # ------------------------------
             # 全エネルギー
@@ -2293,12 +2166,7 @@ def check_base_orbit_stationarity(
             # E_total = 1/2 sum |u_n|^2
             # ------------------------------
 
-            energy_total = (
-                0.5
-                * np.sum(
-                    np.abs(n_u) ** 2
-                )
-            )
+            energy_total = (0.5 * np.sum(np.abs(n_u) ** 2))
 
             times[save_index] = t
 
@@ -2312,44 +2180,23 @@ def check_base_orbit_stationarity(
     # 7. 平均値
     # ========================================================
 
-    epsilon_mean = np.mean(
-        epsilon_history
-    )
+    epsilon_mean = np.mean(epsilon_history)
 
-    injection_mean = np.mean(
-        injection_history
-    )
+    injection_mean = np.mean(injection_history)
 
-    energy_mean = np.mean(
-        energy_history
-    )
+    energy_mean = np.mean(energy_history)
 
-    print(
-        "--- 基準軌道の定常性確認 ---"
-    )
+    print("--- 基準軌道の定常性確認 ---")
     print(f"N = {N}")
     print(f"nu = {nu:.10e}")
     print(f"dt = {dt}")
     print(f"orbit_dt = {orbit_dt}")
-    print(
-        f"transient_time = {transient_time}"
-    )
-    print(
-        f"measurement_time = {measurement_time}"
-    )
-    print(
-        f"<P> = {injection_mean:.10e}"
-    )
-    print(
-        f"<epsilon> = {epsilon_mean:.10e}"
-    )
-    print(
-        f"<P> - <epsilon> = "
-        f"{injection_mean - epsilon_mean:.10e}"
-    )
-    print(
-        f"<E_total> = {energy_mean:.10e}"
-    )
+    print(f"transient_time = {transient_time}")
+    print(f"measurement_time = {measurement_time}")
+    print(f"<P> = {injection_mean:.10e}")
+    print(f"<epsilon> = {epsilon_mean:.10e}")
+    print(f"<P> - <epsilon> = "f"{injection_mean - epsilon_mean:.10e}")
+    print(f"<E_total> = {energy_mean:.10e}")
 
     return {
         "t": times,
@@ -2390,10 +2237,7 @@ def continue_base_orbit(
     # 既存の u_final をそのまま使う
     # --------------------------------------------------------
 
-    n_u = np.asarray(
-        u_initial,
-        dtype=np.complex128,
-    ).copy()
+    n_u = np.asarray(u_initial,dtype=np.complex128).copy()
 
     # --------------------------------------------------------
     # 3. 基準軌道の時間刻み
@@ -2401,30 +2245,20 @@ def continue_base_orbit(
 
     orbit_dt = 0.5 * dt
 
-    n_E_visc_orbit = np.exp(
-        -nu * n_k_sq * orbit_dt
-    )
+    n_E_visc_orbit = np.exp(-nu * n_k_sq * orbit_dt)
 
-    n_E_visc_orbit_half = np.exp(
-        -nu * n_k_sq * orbit_dt * 0.5
-    )
+    n_E_visc_orbit_half = np.exp(-nu * n_k_sq * orbit_dt * 0.5)
 
     # --------------------------------------------------------
     # 4. 計算回数
     # --------------------------------------------------------
 
-    num_steps = int(
-        round(additional_time / orbit_dt)
-    )
+    num_steps = int(round(additional_time / orbit_dt))
 
-    save_every = int(
-        round(save_interval / orbit_dt)
-    )
+    save_every = int(round(save_interval / orbit_dt))
 
     if save_every < 1:
-        raise ValueError(
-            "save_interval は orbit_dt 以上にしてください。"
-        )
+        raise ValueError("save_interval は orbit_dt 以上にしてください。")
 
     num_save = num_steps // save_every
 
@@ -2432,34 +2266,19 @@ def continue_base_orbit(
     # 5. 保存用配列
     # --------------------------------------------------------
 
-    times = np.empty(
-        num_save,
-        dtype=np.float64,
-    )
+    times = np.empty(num_save,dtype=np.float64)
 
-    epsilon_history = np.empty(
-        num_save,
-        dtype=np.float64,
-    )
+    epsilon_history = np.empty(num_save,dtype=np.float64)
 
-    injection_history = np.empty(
-        num_save,
-        dtype=np.float64,
-    )
+    injection_history = np.empty(num_save,dtype=np.float64)
 
-    energy_history = np.empty(
-        num_save,
-        dtype=np.float64,
-    )
+    energy_history = np.empty(num_save,dtype=np.float64)
 
     # --------------------------------------------------------
     # 6. RK4の作業配列
     # --------------------------------------------------------
 
-    work_u = np.empty(
-        (5, N),
-        dtype=np.complex128,
-    )
+    work_u = np.empty((5, N),dtype=np.complex128)
 
     # 保存先の番号
     save_index = 0
@@ -2500,20 +2319,10 @@ def continue_base_orbit(
             )
 
             # 注入率
-            injection = (
-                calculate_energy_injection_numba(
-                    n_u,
-                    f,
-                )
-            )
+            injection = (calculate_energy_injection_numba(n_u,f))
 
             # 全エネルギー
-            energy_total = (
-                0.5
-                * np.sum(
-                    np.abs(n_u) ** 2
-                )
-            )
+            energy_total = (0.5 * np.sum(np.abs(n_u) ** 2))
 
             # 保存
             times[save_index] = t
@@ -2527,17 +2336,11 @@ def continue_base_orbit(
     # 8. 平均値
     # --------------------------------------------------------
 
-    epsilon_mean = np.mean(
-        epsilon_history
-    )
+    epsilon_mean = np.mean(epsilon_history)
 
-    injection_mean = np.mean(
-        injection_history
-    )
+    injection_mean = np.mean(injection_history)
 
-    energy_mean = np.mean(
-        energy_history
-    )
+    energy_mean = np.mean(energy_history)
 
     print("--- 基準軌道の続き計算 ---")
     print(f"N = {N}")
@@ -2546,22 +2349,13 @@ def continue_base_orbit(
     print(f"orbit_dt = {orbit_dt}")
     print(f"additional_time = {additional_time}")
 
-    print(
-        f"<P> = {injection_mean:.10e}"
-    )
+    print(f"<P> = {injection_mean:.10e}")
 
-    print(
-        f"<epsilon> = {epsilon_mean:.10e}"
-    )
+    print(f"<epsilon> = {epsilon_mean:.10e}")
 
-    print(
-        f"<P> - <epsilon> = "
-        f"{injection_mean - epsilon_mean:.10e}"
-    )
+    print(f"<P> - <epsilon> = "f"{injection_mean - epsilon_mean:.10e}")
 
-    print(
-        f"<E_total> = {energy_mean:.10e}"
-    )
+    print(f"<E_total> = {energy_mean:.10e}")
 
     # --------------------------------------------------------
     # 9. 結果を返す
@@ -2585,11 +2379,7 @@ def continue_base_orbit(
 # 10. 描画用関数
 # ============================================================
 
-def plot_lyapunov_history(
-    result,
-    index_start,
-    index_end,
-):
+def plot_lyapunov_history(result,index_start,index_end):
 
     # --------------------------------------------------------
     # データ
@@ -2605,10 +2395,7 @@ def plot_lyapunov_history(
     # --------------------------------------------------------
 
     if not (1 <= index_start <= index_end <= dim):
-        raise ValueError(
-            f"1 <= index_start <= index_end <= {dim} "
-            "となるように指定してください。"
-        )
+        raise ValueError(f"1 <= index_start <= index_end <= {dim} ""となるように指定してください。")
 
     # --------------------------------------------------------
     # 描画
@@ -2618,17 +2405,9 @@ def plot_lyapunov_history(
 
     for i in range(index_start - 1, index_end):
 
-        plt.plot(
-            t,
-            history[:, i],
-            label=rf"$\lambda_{i + 1}$",
-        )
+        plt.plot(t,history[:, i],label=rf"$\lambda_{i + 1}$")
 
-    plt.axhline(
-        0.0,
-        color="black",
-        linewidth=0.8,
-    )
+    plt.axhline(0.0,color="black",linewidth=0.8)
 
     plt.xlabel(r"$t$")
     plt.ylabel(r"$\lambda_i(t)$")
@@ -2656,10 +2435,7 @@ def plot_lyapunov_spectrum(
 
     num_exponents = lambdas.size
 
-    j = np.arange(
-        1,
-        num_exponents + 1,
-    )
+    j = np.arange(1,num_exponents + 1)
 
     # --------------------------------------------------------
     # 拡大表示する終了番号
@@ -2668,10 +2444,7 @@ def plot_lyapunov_spectrum(
     if index_end is None:
         actual_end = num_exponents
     else:
-        actual_end = min(
-            index_end,
-            num_exponents,
-        )
+        actual_end = min(index_end,num_exponents)
 
     # --------------------------------------------------------
     # 表示範囲の確認
@@ -2682,18 +2455,13 @@ def plot_lyapunov_spectrum(
         <= index_start
         <= actual_end
     ):
-        raise ValueError(
-            f"表示範囲を確認してください。"
-            f"この結果の指数は{num_exponents}本です。"
-        )
+        raise ValueError(f"表示範囲を確認してください。"f"この結果の指数は{num_exponents}本です。")
 
     # ========================================================
     # 1. Lyapunov spectrum 全体
     # ========================================================
 
-    plt.figure(
-        figsize=(7, 5.5)
-    )
+    plt.figure(figsize=(7, 5.5))
 
     plt.plot(
         j,
