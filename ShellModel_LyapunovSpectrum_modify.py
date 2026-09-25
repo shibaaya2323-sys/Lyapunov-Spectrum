@@ -253,29 +253,54 @@ def make_initial_condition_numba(n_k, n_k_sq, seed=42):
 
 # ============================================================
 # 6. 初期摂動基底
+#
+# random_basis = True
+#     → ランダムな正規直交基底
+#
+# random_basis = False
+#     → 標準基底
 # ============================================================
 
 @njit
-def make_initial_tangent_basis_numba(N, basis_seed):
+def make_initial_tangent_basis_numba(
+    N,
+    basis_seed=12345,
+    random_basis=True,
+):
     dim = 2 * N
 
-    np.random.seed(basis_seed)
+    n_E = np.zeros((N, dim),dtype=np.complex128)
 
-    # 実 2N 次元のランダム行列
-    A = np.random.normal(0.0, 1.0, (dim, dim))
+    # --------------------------------------------------------
+    # ランダム基底
+    # --------------------------------------------------------
+    if random_basis:
 
-    # 列を正規直交化
-    Q, R = np.linalg.qr(A)
+        np.random.seed(basis_seed)
 
-    # 実 2N 成分 → 複素 N 成分
-    n_E = np.empty((N, dim), dtype=np.complex128)
+        # 実 2N 次元のランダム行列
+        A = np.random.normal(0.0,1.0,(dim, dim))
 
-    for i in range(N):
-        for j in range(dim):
-            n_E[i, j] = (
-                Q[2 * i, j]
-                + 1j * Q[2 * i + 1, j]
-            )
+        # ランダム行列の列を正規直交化
+        Q, R = np.linalg.qr(A)
+
+        # 実 2N 次元 → 複素 N 次元
+        for i in range(N):
+            for j in range(dim):
+                n_E[i, j] = (Q[2 * i, j] + 1j * Q[2 * i + 1, j])
+
+    # --------------------------------------------------------
+    # 標準基底
+    # --------------------------------------------------------
+    else:
+
+        for i in range(N):
+
+            # u_i の実部方向
+            n_E[i, 2 * i] = 1.0 + 0.0j
+
+            # u_i の虚部方向
+            n_E[i, 2 * i + 1] = 0.0 + 1.0j
 
     return n_E
 
@@ -633,6 +658,7 @@ def calculate_lyapunov_numba(
     n_k_sq,
     nu,
     basis_seed,
+    random_basis,
 ):
     n_u = n_u.copy()
 
@@ -645,7 +671,7 @@ def calculate_lyapunov_numba(
     num_save = int(round(t_max / save_interval))
 
     # 初期摂動基底
-    n_E = make_initial_tangent_basis_numba(N_local,basis_seed)
+    n_E = make_initial_tangent_basis_numba(N_local,basis_seed,random_basis)
 
     # 正規直交化の作業配列
     n_Q = np.empty((N_local, dim),dtype=np.complex128)
@@ -653,34 +679,19 @@ def calculate_lyapunov_numba(
     n_w = np.empty(N_local, dtype=np.complex128)
 
     # RK4 の作業配列
-    work_u = np.empty(
-        (5, N_local),
-        dtype=np.complex128,
-    )
-    work_E = np.empty(
-        (5, N_local, dim),
-        dtype=np.complex128,
-    )
+    work_u = np.empty((5, N_local),dtype=np.complex128)
+    work_E = np.empty((5, N_local, dim),dtype=np.complex128)
 
     # 基準軌道の保存用配列
     # n_u_start = u(t)
     # n_u_half  = u(t + dt/2)
-    n_u_start = np.empty(
-        N_local,
-        dtype=np.complex128,
-    )
-    n_u_half = np.empty(
-        N_local,
-        dtype=np.complex128,
-    )
+    n_u_start = np.empty(N_local,dtype=np.complex128)
+    n_u_half = np.empty(N_local,dtype=np.complex128)
 
     # 累積・保存用配列
     n_sum_log = np.zeros(dim, dtype=np.float64)
     n_times = np.zeros(num_save, dtype=np.float64)
-    n_lambda_history = np.zeros(
-        (num_save, dim),
-        dtype=np.float64,
-    )
+    n_lambda_history = np.zeros((num_save, dim),dtype=np.float64)
 
     epsilon_sum = 0.0
     epsilon_count = 0
@@ -873,6 +884,7 @@ def run_lyapunov(
     save_interval,
     seed=42,
     basis_seed=12345,
+    basis_type="standard",
 ):
     # --------------------------------------------------------
     # 入力値の確認と変換
@@ -892,6 +904,9 @@ def run_lyapunov(
         or not 0 <= basis_seed <= 4294967295
     ):
         raise ValueError("basis_seedは0～4294967295の整数にしてください。")
+
+    if basis_type not in ("standard", "random"):
+        raise ValueError('basis_typeは"standard"または"random"にしてください。')
 
     if not np.all(
         np.isfinite(
@@ -1030,37 +1045,26 @@ def run_lyapunov(
     # --------------------------------------------------------
 
     orbit_dt = 0.5 * dt
-    transient_steps_orbit = int(
-        round(transient_time / orbit_dt)
-    )
+    transient_steps_orbit = int(round(transient_time / orbit_dt))
 
     print("--- 計算条件 ---")
     print(f"シェル数 N: {N}")
     print(f"実次元 2N: {2 * N}")
     print(f"初期位相の乱数 seed: {seed}")
-    print(f"初期摂動基底の乱数 basis_seed: {basis_seed}")
+    print(f"初期摂動基底: {basis_type}")
+
+    if basis_type == "random":
+        print(f"初期摂動基底の乱数 basis_seed: {basis_seed}")
     print(f"動粘性係数 nu: {nu:.10e}")
     print(f"変分方程式の時間刻み dt: {dt}")
     print(f"基準軌道の時間刻み dt/2: {orbit_dt}")
     print(f"過渡時間 transient_time: {transient_time}")
-    print(
-        "過渡期間の基準軌道ステップ数: "
-        f"{transient_steps_orbit:,}"
-    )
+    print("過渡期間の基準軌道ステップ数: "f"{transient_steps_orbit:,}")
     print(f"Lyapunov指数の測定時間 t_max: {t_max}")
     print(f"Gram-Schmidt間隔 tau: {tau}")
-    print(
-        "Lyapunov指数の保存間隔 "
-        f"save_interval: {save_interval}"
-    )
-    print(
-        "1回のGram-Schmidtまでの変分方程式ステップ数: "
-        f"{steps_per_tau:,}"
-    )
-    print(
-        "1回のGram-Schmidtまでの基準軌道ステップ数: "
-        f"{2 * steps_per_tau:,}"
-    )
+    print("Lyapunov指数の保存間隔 "f"save_interval: {save_interval}")
+    print("1回のGram-Schmidtまでの変分方程式ステップ数: "f"{steps_per_tau:,}")
+    print("1回のGram-Schmidtまでの基準軌道ステップ数: "f"{2 * steps_per_tau:,}")
     print(f"Gram-Schmidt回数: {num_tau:,}")
     print()
 
@@ -1112,6 +1116,7 @@ def run_lyapunov(
         n_k_sq,
         nu,
         basis_seed,
+        basis_type == "random",
     )
 
     # --------------------------------------------------------
@@ -1121,18 +1126,12 @@ def run_lyapunov(
     lambdas = n_lambda_history[-1].copy()
 
     D_KY = calculate_kaplan_yorke_dimension(lambdas)
-    k_d = calculate_dissipation_wavenumber(
-        epsilon_mean,
-        nu,
-    )
+    k_d = calculate_dissipation_wavenumber(epsilon_mean,nu)
 
     divergence = -2.0 * nu * np.sum(n_k_sq)
     lambda_sum = np.sum(lambdas)
 
-    relative_error = (
-        abs(lambda_sum - divergence)
-        / abs(divergence)
-    )
+    relative_error = (abs(lambda_sum - divergence) / abs(divergence))
 
     # --------------------------------------------------------
     # 結果表示
@@ -1145,23 +1144,14 @@ def run_lyapunov(
     print("--- Lyapunov spectrum ---")
 
     for j in range(lambdas.size):
-        print(
-            f"lambda_{j + 1:2d} = "
-            f"{lambdas[j]: .10e}"
-        )
+        print(f"lambda_{j + 1:2d} = "f"{lambdas[j]: .10e}")
 
     print()
-    print(
-        "Kaplan-Yorke dimension "
-        f"D_KY = {D_KY:.10f}"
-    )
+    print("Kaplan-Yorke dimension "f"D_KY = {D_KY:.10f}")
 
     print()
     print("--- Fig.4 用の値 ---")
-    print(
-        "平均エネルギー散逸率 "
-        f"<epsilon> = {epsilon_mean:.10e}"
-    )
+    print("平均エネルギー散逸率 "f"<epsilon> = {epsilon_mean:.10e}")
     print(f"散逸波数 k_d = {k_d:.10e}")
 
     print()
@@ -1169,10 +1159,7 @@ def run_lyapunov(
     print(f"sum(lambda_i) = {lambda_sum:.10e}")
     print(f"div F = {divergence:.10e}")
     print(f"relative error = {relative_error:.10e}")
-    print(
-        "relative error (%) = "
-        f"{100.0 * relative_error:.6f} %"
-    )
+    print("relative error (%) = "f"{100.0 * relative_error:.6f} %")
 
     # --------------------------------------------------------
     # 辞書形式で返す
@@ -1188,6 +1175,7 @@ def run_lyapunov(
         "save_interval": save_interval,
         "seed": seed,
         "basis_seed": basis_seed,
+        "basis_type": basis_type,
         "lambda_1": np.max(lambdas),
         "H": calculate_kolmogorov_entropy(lambdas),
         "k": n_k.copy(),
