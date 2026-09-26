@@ -1206,6 +1206,7 @@ def run_fig3(
     save_interval=1.0,
     seed=42,
     basis_seed=12345,
+    basis_type="standard",
 ):
     result = run_lyapunov(
         N=N,
@@ -1217,6 +1218,7 @@ def run_fig3(
         save_interval=save_interval,
         seed=seed,
         basis_seed=basis_seed,
+        basis_type=basis_type,
     )
 
     print()
