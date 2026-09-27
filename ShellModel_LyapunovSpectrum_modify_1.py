@@ -224,6 +224,149 @@ def variational_nonlinear_into_numba(
             )
         )
 
+# ============================================================
+# 4-A. 第一変分方程式の中心差分による検証
+#
+# J(u)e と
+#
+#   [F(u + h e) - F(u - h e)] / (2h)
+#
+# を比較する。
+#
+# 粘性項 -nu k_n^2 u_n も含めて、
+# 元のベクトル場全体の線形化を検証する。
+# ============================================================
+
+
+def check_variational_central_difference(
+    n_u,
+    n_e,
+    nu,
+    n_k_sq,
+    n_c1,
+    n_c2,
+    n_c3,
+    f,
+    h=1.0e-6,
+):
+
+    n_u = np.asarray(n_u,dtype=np.complex128)
+
+    n_e = np.asarray(n_e,dtype=np.complex128)
+
+    N = n_u.size
+
+    if n_e.shape != n_u.shape:
+        raise ValueError("n_e は n_u と同じ形にしてください。")
+
+    if h <= 0.0:
+        raise ValueError("h は正の値にしてください。")
+
+    # --------------------------------------------------------
+    # 1. 第一変分方程式から J(u)e を計算
+    # --------------------------------------------------------
+
+    E = n_e.reshape(N, 1).copy()
+
+    dE_nonlinear = np.empty((N, 1),dtype=np.complex128)
+
+    variational_nonlinear_into_numba(
+        n_u,
+        E,
+        n_c1,
+        n_c2,
+        n_c3,
+        dE_nonlinear,
+    )
+
+    # 粘性項を加える
+    Je = (dE_nonlinear[:, 0] - nu * n_k_sq * n_e)
+
+    # --------------------------------------------------------
+    # 2. 中心差分
+    #
+    # F(u + h e)
+    # F(u - h e)
+    # --------------------------------------------------------
+
+    u_plus = n_u + h * n_e
+    u_minus = n_u - h * n_e
+
+    F_plus = np.empty(N,dtype=np.complex128)
+
+    F_minus = np.empty(N,dtype=np.complex128)
+
+    nonlinear_into_numba(
+        u_plus,
+        n_c1,
+        n_c2,
+        n_c3,
+        f,
+        F_plus,
+    )
+
+    nonlinear_into_numba(
+        u_minus,
+        n_c1,
+        n_c2,
+        n_c3,
+        f,
+        F_minus,
+    )
+
+    # 粘性項を加えて
+    # 元の微分方程式 F(u) 全体にする
+    F_plus -= nu * n_k_sq * u_plus
+    F_minus -= nu * n_k_sq * u_minus
+
+    central_difference = (F_plus - F_minus) / (2.0 * h)
+
+    # --------------------------------------------------------
+    # 3. 誤差
+    # --------------------------------------------------------
+
+    difference = Je - central_difference
+
+    absolute_error = np.linalg.norm(difference)
+
+    Je_norm = np.linalg.norm(Je)
+
+    if Je_norm > 0.0:
+        relative_error = (absolute_error / Je_norm)
+    else:
+        relative_error = np.nan
+
+    max_component_error = np.max(np.abs(difference))
+
+    # --------------------------------------------------------
+    # 4. 結果表示
+    # --------------------------------------------------------
+
+    print("=== 第一変分方程式：中心差分検証 ===")
+
+    print(f"h = {h:.1e}")
+    print()
+
+    print("||J(u)e|| = "f"{Je_norm:.16e}")
+
+    print("||J(u)e - central difference|| = "f"{absolute_error:.16e}")
+
+    print("relative error = "f"{relative_error:.16e}")
+
+    print("max component error = "f"{max_component_error:.16e}")
+
+    return {
+        "h": h,
+        "Je": Je.copy(),
+        "central_difference":
+            central_difference.copy(),
+        "difference": difference.copy(),
+        "absolute_error": absolute_error,
+        "relative_error": relative_error,
+        "max_component_error":
+            max_component_error,
+    }
+
 
 # ============================================================
 # 5. 初期条件
