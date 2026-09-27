@@ -2099,39 +2099,3 @@ def plot_fig1(result):
 
     plt.tight_layout()
     plt.show()
-
-# ============================================================
-# 24. Fig.2 用：Lyapunov 指数の順序確認
-# ============================================================
-
-def check_fig2_lyapunov_order(result):
-
-    lambdas = np.asarray(
-        result["lambdas"],
-        dtype=np.float64,
-    )
-
-    print("--- Fig.2 用 Lyapunov 指数の順序確認 ---")
-
-    order_ok = True
-
-    for j in range(lambdas.size - 1):
-
-        if lambdas[j] < lambdas[j + 1]:
-
-            order_ok = False
-
-            print(
-                f"順序逆転: "
-                f"lambda_{j + 1} = {lambdas[j]: .10e} "
-                f"< "
-                f"lambda_{j + 2} = {lambdas[j + 1]: .10e}"
-            )
-
-    if order_ok:
-        print(
-            "lambda_1 >= lambda_2 >= ... >= lambda_2N "
-            "が成立しています。"
-        )
-
-    return order_ok
