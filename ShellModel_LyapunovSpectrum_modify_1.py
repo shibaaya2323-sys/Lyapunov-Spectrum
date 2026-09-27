@@ -727,6 +727,21 @@ def calculate_lyapunov_numba(
     epsilon_count = 0
     save_index = 0
 
+    # --------------------------------------------------------
+    # Fig.1 用
+    #
+    # n_vector_energy_sum[i, j]
+    #   = 第 j Lyapunov ベクトルの
+    #     第 i シェル成分 |v_i^(j)|^2 の時間累積
+    #
+    # vector_energy_count
+    #   = 平均に使用した Gram-Schmidt 回数
+    # --------------------------------------------------------
+
+    n_vector_energy_sum = np.zeros((N_local, dim),dtype=np.float64)
+
+    vector_energy_count = 0
+
     # ============================================================
     # 摂動基底の過渡
     #
@@ -949,6 +964,20 @@ def calculate_lyapunov_numba(
             n_w,
         )
 
+        # --------------------------------------------------------
+        # Fig.1 用
+        #
+        # Gram-Schmidt 後の第 j ベクトルについて
+        # 各シェル i の |v_i^(j)|^2 を累積する
+        # --------------------------------------------------------
+
+        for i in range(N_local):
+            for j in range(dim):
+
+                n_vector_energy_sum[i, j] += (n_Q[i, j].real**2 + n_Q[i, j].imag**2)
+
+        vector_energy_count += 1
+
         # Q を次の摂動基底として使用する
         # 古い E は次回の Q の書き込み先として再利用する
         n_E, n_Q = n_Q, n_E
@@ -984,11 +1013,21 @@ def calculate_lyapunov_numba(
 
     epsilon_mean = epsilon_sum / epsilon_count
 
+    # --------------------------------------------------------
+    # Fig.1 用
+    #
+    # 各 Lyapunov ベクトルについて
+    # |v_n^(j)|^2 の時間平均を計算
+    # --------------------------------------------------------
+
+    n_vector_energy_mean = (n_vector_energy_sum / vector_energy_count)
+
     return (
         n_u,
         n_times,
         n_lambda_history,
         epsilon_mean,
+        n_vector_energy_mean,
     )
 
 # ============================================================
@@ -1316,6 +1355,7 @@ def run_lyapunov(
         n_times,
         n_lambda_history,
         epsilon_mean,
+        n_vector_energy_mean,
     ) = calculate_lyapunov_numba(
         n_u,
         dt,
@@ -1401,6 +1441,7 @@ def run_lyapunov(
         "t": n_times.copy(),
         "lambdas": lambdas.copy(),
         "lambda_history": n_lambda_history.copy(),
+        "vector_energy_mean": n_vector_energy_mean.copy(),
         "D_KY": D_KY,
         "epsilon_mean": epsilon_mean,
         "k_d": k_d,
@@ -1766,6 +1807,122 @@ def plot_lyapunov_spectrum(
         rf"($j={index_start},\ldots,{actual_end}$)"
     )
     plt.grid()
+
+    plt.tight_layout()
+    plt.show()
+
+# ============================================================
+# 23. Fig.1 描画用関数
+#
+# 横軸:
+#   Lyapunov ベクトル番号 j = 1, 2, ..., 2N
+#
+# 縦軸:
+#   シェル番号 n = 1, 2, ..., N
+#
+# 等高線:
+#   E^(j)(k_n) = < |v_n^(j)|^2 >
+# ============================================================
+
+
+def plot_fig1(result):
+
+    # --------------------------------------------------------
+    # Fig.1 用データ
+    # --------------------------------------------------------
+
+    vector_energy = np.asarray(
+        result["vector_energy_mean"],
+        dtype=np.float64,
+    )
+
+    N, dim = vector_energy.shape
+
+    # Lyapunov ベクトル番号
+    j_values = np.arange(
+        1,
+        dim + 1,
+        dtype=np.float64,
+    )
+
+    # シェル番号
+    n_values = np.arange(
+        1,
+        N + 1,
+        dtype=np.float64,
+    )
+
+    # --------------------------------------------------------
+    # 2次元座標
+    # --------------------------------------------------------
+
+    J, NN = np.meshgrid(
+        j_values,
+        n_values,
+    )
+
+    # --------------------------------------------------------
+    # 論文 Fig.1 と同じ等高線レベル
+    #
+    # 0.0489 i,  i = 1,2,...,10
+    # --------------------------------------------------------
+
+    levels = (
+        0.0489
+        * np.arange(
+            1,
+            11,
+            dtype=np.float64,
+        )
+    )
+
+    # --------------------------------------------------------
+    # 描画
+    # --------------------------------------------------------
+
+    plt.figure(
+        figsize=(7, 6),
+    )
+
+    plt.contour(
+        J,
+        NN,
+        vector_energy,
+        levels=levels,
+        colors="black",
+        linewidths=1.0,
+    )
+
+    # --------------------------------------------------------
+    # 軸
+    # --------------------------------------------------------
+
+    plt.xlabel(
+        r"$j$",
+        fontsize=16,
+    )
+
+    plt.ylabel(
+        r"$n$",
+        fontsize=16,
+    )
+
+    plt.xlim(
+        0,
+        dim,
+    )
+
+    plt.ylim(
+        0,
+        N,
+    )
+
+    plt.tick_params(
+        which="both",
+        direction="in",
+        top=True,
+        right=True,
+    )
 
     plt.tight_layout()
     plt.show()
