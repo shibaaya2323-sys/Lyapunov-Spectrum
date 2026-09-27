@@ -1905,7 +1905,7 @@ def plot_fig1(result):
     n_left = (D / 2.0 - j_left + 1.0)
 
     # 右側
-    j_right = np.linspace(D / 2.0,D,200)
+    j_right = np.linspace(D / 2.0 + 1,D,200)
 
     n_right = (j_right - D / 2.0)
 
@@ -1938,12 +1938,12 @@ def plot_fig1(result):
     )
 
     plt.xlim(
-        0,
+        1,
         dim,
     )
 
     plt.ylim(
-        0,
+        1,
         N,
     )
 
